@@ -5,7 +5,7 @@ import {Readable} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 import {pool,requestUser} from './runtime.mjs';
 import {migrate} from './migrate.mjs';
-import {createAuth} from './auth.mjs';
+import {createAuth,workspaceAccess} from './auth.mjs';
 import {authHTML,authJS} from './auth-page.mjs';
 import * as workspace from '../render-dist/workspace.mjs';
 for(const key of ['DATABASE_URL','AWS_REGION','S3_BUCKET','ADMIN_EMAIL','BOOTSTRAP_TOKEN'])if(!process.env[key])throw new Error('Missing required setting: '+key);
@@ -31,13 +31,13 @@ async function dispatch(req){
   if(url.pathname==='/logout'&&req.method==='POST'){const result=await auth.act('logout',{},req);return new Response(null,{status:303,headers:{Location:'/login','Set-Cookie':result.cookie}})}
   if(url.pathname==='/api/workspace'){
     const user=await auth.current(req);
-    if(!user)return json({error:'Inicie sessão para continuar.'},401);
+    const denied=workspaceAccess(user);if(denied)return json(denied.body,denied.status);
     // Only the configured owner account can initialize the company on the public Render URL.
     if(!(await pool.query('SELECT id FROM company LIMIT 1')).rows.length&&user.email!==process.env.ADMIN_EMAIL.toLowerCase())return json({error:'Aguarde a configuração pelo administrador.'},403);
     return requestUser.run(user,()=>req.method==='GET'?workspace.GET(req):req.method==='POST'?workspace.POST(req):json({error:'Método não permitido.'},405));
   }
   if(req.method!=='GET'&&req.method!=='HEAD')return json({error:'Método não permitido.'},405);
-  if(['/login','/activate','/setup-account'].includes(url.pathname))return new Response(authHTML,{headers:{'Content-Type':'text/html; charset=utf-8'}});
+  if(['/login','/activate','/setup-account','/change-password'].includes(url.pathname))return new Response(authHTML,{headers:{'Content-Type':'text/html; charset=utf-8'}});
   if(url.pathname==='/auth-client.js')return new Response(authJS,{headers:{'Content-Type':'application/javascript; charset=utf-8'}});
   if(url.pathname.startsWith('/api/'))return json({error:'Não encontrado.'},404);
   const relative=url.pathname==='/'?'index.html':decodeURIComponent(url.pathname).replace(/^\/+/, '');

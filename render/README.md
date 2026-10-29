@@ -74,3 +74,17 @@ Referências: [Render Blueprints](https://render.com/docs/blueprint-spec), [AWS 
 O Administrador aprova ou rejeita pedidos; não pode aprovar o seu próprio pedido. Financeiro e Administrador podem registar pagamentos apenas após aprovação do Administrador. Financeiro consulta pedidos e comprovativos da empresa, mas não gere a equipa, cria projectos ou encerra contas. Gestor mantém a gestão de projectos e o encerramento de contas, sem aprovar ou registar pagamentos.
 
 A migração `002_finance_role.sql` acrescenta a função sem apagar dados. Pedidos antigos aprovados por Gestores requerem validação do Administrador antes do pagamento. Pagamentos e contas já encerradas são preservados.
+
+## Entradas e saídas
+
+Admin e Financeiro têm acesso a uma página de tesouraria com créditos, débitos, saldo, filtros e CSV. Os lançamentos manuais exigem data, descrição, origem/beneficiário, método, referência e comprovativo PDF/JPEG/PNG até 10 MB. A associação ao projecto é opcional. Cada registo conserva autor, data de criação e hash do comprovativo; não existem operações de edição ou eliminação. O mesmo envio repetido não cria outro lançamento.
+
+Pagamentos de pedidos com estado Pago ou Encerrado são incluídos como saídas automaticamente, uma vez por pedido, incluindo pagamentos anteriores a esta versão. Aprovar um pedido não movimenta o saldo. Não lance manualmente esses pagamentos. O saldo representa os movimentos registados ou filtrados, não uma consulta de contas bancárias. Créditos significam entradas de fundos; não há cálculo de juros ou gestão de empréstimos.
+
+A migração `003_cash_movements.sql` acrescenta uma tabela e índices sem alterar os pedidos existentes. O saldo pode ser negativo se existirem pagamentos anteriores sem entradas correspondentes. Registe apenas entradas reais; os registos não são preenchidos automaticamente.
+
+## Links de redefinição e palavra-passe temporária
+
+Em Equipa, o Admin pode gerar um **Link de acesso / redefinição**, copiá-lo e enviá-lo directamente à pessoa. O link é associado ao email, expira em 48 horas e funciona uma única vez; gerar outro invalida o anterior. O programa não envia emails automaticamente.
+
+A opção **Definir palavra-passe** permite ao Admin definir uma palavra-passe temporária para Técnico, Gestor ou Financeiro (incluindo uma conta ainda não activada). Sessões e convites anteriores são invalidados. Após entrar, a pessoa só poderá usar a aplicação depois de escolher uma palavra-passe diferente. A conta do próprio Admin não pode ser redefinida por esta opção; pode utilizar **Alterar palavra-passe** com a sua palavra-passe actual. As alterações ficam auditadas sem gravar as palavras-passe no histórico.

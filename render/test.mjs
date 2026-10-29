@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
 import {createDatabase} from './postgres.mjs';
-import {createAuth} from './auth.mjs';
+import {createAuth,workspaceAccess} from './auth.mjs';
 import {migrate} from './migrate.mjs';
 import {createBucket} from './storage.mjs';
+import {collectCashRows} from '../app/cash-ledger-data.mjs';
 const pg=new PGlite();
 const client={async query(sql,args){if(sql.includes('pg_advisory_'))return {rows:[],rowCount:0};const r=args?await pg.query(sql,args):(await pg.exec(sql)).at(-1);return {rows:r?.rows||[],rowCount:r?.affectedRows||0}},release(){}};
 const pool={query:client.query,async connect(){return client}};
@@ -79,5 +80,64 @@ await activate('tech@example.com');assert.equal(await auth.current(req(techCooki
 const commands=[];const bucket=createBucket({S3_BUCKET:'test-bucket',AWS_REGION:'eu-west-1',S3_PREFIX:'electomatic/'},{async send(command){commands.push(command);if(command.constructor.name==='GetObjectCommand')return {Body:{transformToWebStream:()=>new ReadableStream()}};return {}}});
 const id='12345678-1234-1234-1234-123456789012';await bucket.put(id,new ArrayBuffer(1),{httpMetadata:{contentType:'application/pdf'}});await bucket.get(id);await bucket.delete(id);assert.deepEqual(commands.map(c=>c.constructor.name),['PutObjectCommand','GetObjectCommand','DeleteObjectCommand']);assert.equal(commands[0].input.Key,'electomatic/'+id);assert.equal(commands[0].input.ACL,undefined);
 await assert.rejects(()=>bucket.get('../secret'));
+
+// Cash movements: permissions, proof, retry safety, totals and authorized downloads.
+function movement(id,overrides={}){const f=new FormData();for(const [k,v] of Object.entries({action:'movement',entry_id:id,direction:'credit',amount:'10000.50',date:'2026-01-01',description:'Client payment',project,counterparty:'Client',method:'Transferência bancária',reference:'BANK-001',...overrides}))f.set(k,v);f.set('file',new File(['%PDF-1.7 cash proof'],'cash.pdf',{type:'application/pdf'}));return f}
+const cashId=crypto.randomUUID();
+user=await auth.current(req(managerCookie));await post(movement(cashId),403);
+const renewed=await auth.act('login',{email:'tech@example.com',password:'staff-password-123'},req());
+user=await auth.current(req(renewed.cookie));await post(movement(cashId),403);
+user=await auth.current(req(financeCookie));
+const invalidProof=movement(cashId);invalidProof.delete('file');await post(invalidProof,400);
+await post(movement(cashId,{date:'2026-02-30'}),400);
+await post(movement(cashId,{amount:'-1'}),400);
+await post(movement(cashId,{amount:'0.001'}),400);
+await post(movement(cashId,{project:'missing'}),400);
+await post(movement(cashId));
+await post(movement(cashId));
+await post(movement(cashId,{amount:'100'}),409);
+assert.equal((await get()).movements.length,1);
+assert.equal((await get()).audit.filter(a=>a.action==='Entrada registada').length,1);
+const download=await api.GET(new Request('http://localhost/api/workspace?movement_file='+cashId));assert.equal(download.status,200);assert.equal(download.headers.get('Content-Type'),'application/pdf');
+user=await auth.current(req(boot.cookie));
+await post(movement(crypto.randomUUID(),{direction:'debit',amount:'500',project:'',description:'Office expense',reference:'CASH-002'}));
+const ledger=collectCashRows(await get());
+assert.equal(ledger.filter(r=>r.source==='request'&&r.id===request.id).length,1);
+assert.equal(ledger.length,3); // one credit, one manual debit, one existing request payment
+assert.equal(ledger.reduce((sum,r)=>sum+(r.direction==='credit'?r.amount:-r.amount),0),700000);
+user=await auth.current(req(managerCookie));assert.equal((await get()).movements.length,0);assert.equal((await get()).audit.filter(a=>['Entrada registada','Saída registada'].includes(a.action)).length,0);
+assert.equal((await api.GET(new Request('http://localhost/api/workspace?movement_file='+cashId))).status,403);
+user=await auth.current(req(renewed.cookie));assert.equal((await get()).movements.length,0);
+console.log('PASS: cash credit/debit roles, mandatory proof, dates, project validation, idempotent retries, private downloads and automatic request debits without duplication.');
+
+// Admin-forced passwords revoke sessions/invitations and require a new password before workspace access.
+await assert.rejects(()=>auth.act('force-password',{email:'finance@example.com',password:'temporary-12345'},req(renewed.cookie)),e=>e.status===403);
+await assert.rejects(()=>auth.act('force-password',{email:'owner@example.com',password:'temporary-12345'},req(boot.cookie)),e=>e.status===403);
+await assert.rejects(()=>auth.act('force-password',{email:'finance@example.com',password:'short'},req(boot.cookie)),e=>e.status===400);
+const stale=await auth.act('invite',{email:'finance@example.com'},req(boot.cookie));
+await auth.act('force-password',{email:'finance@example.com',password:'temporary-12345'},req(boot.cookie));
+assert.equal(await auth.current(req(financeCookie)),null);
+await assert.rejects(()=>auth.act('activate',{email:'finance@example.com',token:stale.body.invitation.split('#')[1],password:'another-password-123'},req()),e=>e.status===403);
+await assert.rejects(()=>auth.act('login',{email:'finance@example.com',password:'staff-password-123'},req()),e=>e.status===401);
+const temporary=await auth.act('login',{email:'finance@example.com',password:'temporary-12345'},req());
+assert.equal(temporary.body.redirect,'/change-password');
+assert.equal(workspaceAccess(await auth.current(req(temporary.cookie))).body.redirect,'/change-password');
+await assert.rejects(()=>auth.act('change-password',{currentPassword:'incorrect',password:'new-private-password'},req(temporary.cookie)),e=>e.status===403);
+await assert.rejects(()=>auth.act('change-password',{currentPassword:'temporary-12345',password:'temporary-12345'},req(temporary.cookie)),e=>e.status===400);
+const changed=await auth.act('change-password',{currentPassword:'temporary-12345',password:'new-private-password'},req(temporary.cookie));
+assert.equal(workspaceAccess(await auth.current(req(changed.cookie))),null);
+assert.equal(await auth.current(req(temporary.cookie)),null);
+const details=(await pool.query("SELECT detail FROM audit WHERE action IN ('Palavra-passe temporária definida','Palavra-passe alterada')")).rows;
+assert.ok(details.length>=2);assert.ok(details.every(r=>!r.detail.includes('password')&&!r.detail.includes('temporary-12345')));
+// A newer reset link invalidates an older link; activation links expire and are single-use.
+const older=await auth.act('invite',{email:'manager@example.com'},req(boot.cookie));
+const newer=await auth.act('invite',{email:'manager@example.com'},req(boot.cookie));
+await assert.rejects(()=>auth.act('activate',{email:'manager@example.com',token:older.body.invitation.split('#')[1],password:'manager-private-pass'},req()),e=>e.status===403);
+await auth.act('activate',{email:'manager@example.com',token:newer.body.invitation.split('#')[1],password:'manager-private-pass'},req());
+await assert.rejects(()=>auth.act('activate',{email:'manager@example.com',token:newer.body.invitation.split('#')[1],password:'manager-private-pass'},req()),e=>e.status===403);
+const expired=await auth.act('invite',{email:'manager@example.com'},req(boot.cookie));
+await pool.query("UPDATE invites SET expires=now()-interval '1 minute' WHERE email='manager@example.com'");
+await assert.rejects(()=>auth.act('activate',{email:'manager@example.com',token:expired.body.invitation.split('#')[1],password:'manager-private-pass'},req()),e=>e.status===403);
+console.log('PASS: temporary passwords restricted to Admin, revoked sessions/links, mandatory password change, password-free audit records, replaced/single-use/expired reset links.');
 console.log('PASS: PostgreSQL migrations, large money, transactional workflow/audits, receipt rules, restricted bootstrap, single-use invitations, sessions, logout, password reset and private S3 adapter.');
 await pg.close();
