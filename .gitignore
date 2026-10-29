@@ -28,6 +28,7 @@ yarn-error.log*
 
 # Local environment and keys
 .env*
+!.env.render.example
 .dev.vars*
 *.pem
 
@@ -43,3 +44,6 @@ yarn-error.log*
 
 # OS metadata
 .DS_Store
+
+# Render browser/server build
+/render-dist/

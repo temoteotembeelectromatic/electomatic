@@ -1,5 +1,9 @@
 # Electomatic — Gestão de fundos
 
+## Render deployment
+
+The Render edition runs on Node with **PostgreSQL and a private AWS S3 bucket**, independent employee accounts and one-time invitations. Use the [Render deployment guide](render/README.md) and the root `render.yaml`. All credentials and bucket details are environment variables. The original Sites edition described below remains supported separately.
+
 Company funding requests for Mozambique. Portuguese interface, MZN integer-cent amounts and Africa/Maputo display times. Hosted on Sites with ChatGPT sign-in, D1 records and R2 evidence files.
 
 ## First use

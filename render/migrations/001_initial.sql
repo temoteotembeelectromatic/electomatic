@@ -1,0 +1,15 @@
+CREATE TABLE company (id integer PRIMARY KEY CHECK(id=1), name text NOT NULL, nuit text NOT NULL, owner text NOT NULL);
+CREATE TABLE members (email text PRIMARY KEY, user_id text UNIQUE, name text NOT NULL, role text NOT NULL CHECK(role IN ('admin','manager','technician')));
+CREATE TABLE projects (id text PRIMARY KEY, name text NOT NULL, location text NOT NULL, client text NOT NULL, budget bigint NOT NULL CHECK(budget>0), created text NOT NULL);
+CREATE TABLE requests (id text PRIMARY KEY, project text NOT NULL REFERENCES projects(id), requester text NOT NULL, requester_name text NOT NULL, purpose text NOT NULL, category text NOT NULL, amount bigint NOT NULL CHECK(amount>0), status text NOT NULL CHECK(status IN ('pending','approved','rejected','paid','closed')), created text NOT NULL, decided_by text, decision_note text, method text, reference text, paid_date text, payee text, version integer NOT NULL DEFAULT 0);
+CREATE TABLE evidence (id text PRIMARY KEY, request text NOT NULL REFERENCES requests(id), kind text NOT NULL, filename text NOT NULL, mime text NOT NULL, bytes integer NOT NULL, sha256 text NOT NULL, uploaded_by text NOT NULL, created text NOT NULL);
+CREATE TABLE audit (id text PRIMARY KEY, request text, actor text NOT NULL, action text NOT NULL, detail text NOT NULL, created text NOT NULL);
+CREATE INDEX requests_requester ON requests(requester);
+CREATE INDEX requests_project ON requests(project);
+CREATE INDEX evidence_request ON evidence(request);
+CREATE INDEX audit_request ON audit(request);
+CREATE TABLE accounts (id text PRIMARY KEY, email text NOT NULL UNIQUE, name text NOT NULL, password_hash text NOT NULL, created timestamptz NOT NULL DEFAULT now());
+CREATE TABLE sessions (token_hash text PRIMARY KEY, account text NOT NULL REFERENCES accounts(id), expires timestamptz NOT NULL);
+CREATE INDEX sessions_expires ON sessions(expires);
+CREATE TABLE invites (token_hash text PRIMARY KEY, email text NOT NULL UNIQUE REFERENCES members(email), expires timestamptz NOT NULL);
+CREATE TABLE login_limits (key text PRIMARY KEY, attempts integer NOT NULL, expires timestamptz NOT NULL);

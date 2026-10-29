@@ -1,0 +1,61 @@
+import {PGlite} from '@electric-sql/pglite';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import ts from 'typescript';
+import {createDatabase} from './postgres.mjs';
+import {createAuth} from './auth.mjs';
+import {migrate} from './migrate.mjs';
+import {createBucket} from './storage.mjs';
+const pg=new PGlite();
+const client={async query(sql,args){if(sql.includes('pg_advisory_'))return {rows:[],rowCount:0};const r=args?await pg.query(sql,args):(await pg.exec(sql)).at(-1);return {rows:r?.rows||[],rowCount:r?.affectedRows||0}},release(){}};
+const pool={query:client.query,async connect(){return client}};
+await migrate(pool);await migrate(pool);
+const DB=createDatabase(pool);
+const config={ADMIN_EMAIL:'owner@example.com',BOOTSTRAP_TOKEN:'x'.repeat(40),NODE_ENV:'development'};
+const auth=createAuth(pool,config);
+const req=cookie=>new Request('http://localhost/',{headers:{cookie:cookie||''}});
+await assert.rejects(()=>auth.act('bootstrap',{email:config.ADMIN_EMAIL,password:'long-password-123',token:'bad'},req()),e=>e.status===403);
+const boot=await auth.act('bootstrap',{email:config.ADMIN_EMAIL,password:'long-password-123',token:config.BOOTSTRAP_TOKEN},req());
+let user=await auth.current(req(boot.cookie));assert.equal(user.email,config.ADMIN_EMAIL);
+await assert.rejects(()=>auth.act('bootstrap',{email:config.ADMIN_EMAIL,password:'long-password-123',token:config.BOOTSTRAP_TOKEN},req()),e=>e.status===403);
+const storage=new Map();globalThis.__renderEnv={DB,BUCKET:{async put(k,v){storage.set(k,v)},async get(k){return storage.has(k)?{body:storage.get(k)}:null},async delete(k){storage.delete(k)}}};
+globalThis.__renderUser=()=>user;
+let source=fs.readFileSync('app/api/workspace/route.ts','utf8').replace("import { env } from 'cloudflare:workers';",'const env=globalThis.__renderEnv;').replace("import { getChatGPTUser } from '../../chatgpt-auth';",'const getChatGPTUser=async()=>globalThis.__renderUser();');
+const api=await import('data:text/javascript;base64,'+Buffer.from(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText).toString('base64'));
+async function post(b,status=200){const form=b instanceof FormData;const r=await api.POST(new Request('http://localhost/api/workspace',{method:'POST',headers:form?{}:{'Content-Type':'application/json'},body:form?b:JSON.stringify(b)}));const body=await r.json();assert.equal(r.status,status,JSON.stringify(body));return body}
+async function get(){return (await api.GET(new Request('http://localhost/api/workspace'))).json()}
+await post({action:'setup',name:'Electomatic',nuit:'123456789'});
+await post({action:'member',email:'tech@example.com',name:'Tech',role:'technician'});
+await post({action:'member',email:'manager@example.com',name:'Manager',role:'manager'});
+await post({action:'project',name:'Maputo',client:'Client',location:'Maputo',budget:'999999999'});
+const project=(await get()).projects[0].id;
+async function activate(email){const invite=await auth.act('invite',{email},req(boot.cookie));const token=invite.body.invitation.split('#')[1];const activated=await auth.act('activate',{email,token,password:'staff-password-123'},req());await assert.rejects(()=>auth.act('activate',{email,token,password:'staff-password-123'},req()),e=>e.status===403);return activated.cookie}
+const techCookie=await activate('tech@example.com');const managerCookie=await activate('manager@example.com');
+user=await auth.current(req(techCookie));
+const request=await post({action:'request',project,purpose:'Materials',category:'Materiais',amount:'2500.50'});
+await post({action:'decision',id:request.id,status:'approved',note:'Self'},403);
+user=await auth.current(req(managerCookie));
+await post({action:'decision',id:request.id,status:'approved',note:'Verified'});
+await post({action:'decision',id:request.id,status:'approved',note:'Repeated'},409);
+function file(action,kind='receipt'){const f=new FormData();for(const [k,v]of Object.entries({action,id:request.id,kind,method:'M-Pesa',reference:'MP-001',payee:'Tech',date:'2026-01-01'}))f.set(k,v);f.set('file',new File(['%PDF-1.7 test'],'proof.pdf',{type:'application/pdf'}));return f}
+await post({action:'pay',id:request.id},400);
+await post(file('pay'));
+await post(file('upload','supporting'));
+await post({action:'close',id:request.id,note:'Not yet'},400);
+await post(file('upload'));
+await post({action:'close',id:request.id,note:'Receipts reconciled'});
+const state=await get();assert.equal(state.requests[0].status,'closed');assert.equal(state.audit.filter(a=>a.request===request.id).length,6);assert.equal(storage.size,3);
+// Atomic batches roll back every statement and keep conditional audit inserts out after conflicts.
+await assert.rejects(()=>DB.batch([DB.prepare('UPDATE requests SET version=version+1 WHERE id=?').bind(request.id),DB.prepare('INSERT INTO company(id,name,nuit,owner) VALUES(1,?,?,?)').bind('duplicate','123456789','x')]));
+const count=(await DB.prepare('SELECT count(*)::int AS n FROM audit').first()).n;
+await DB.batch([DB.prepare('UPDATE requests SET version=version+1 WHERE id=? AND version=-1').bind(request.id),DB.prepare('INSERT INTO audit(id,actor,action,detail,created) SELECT ?,?,?,?,? WHERE changes()=1').bind('nope','x','x','x','x')]);
+assert.equal((await DB.prepare('SELECT count(*)::int AS n FROM audit').first()).n,count);
+await assert.rejects(()=>auth.act('login',{email:'tech@example.com',password:'incorrect'},req()),e=>e.status===401);
+const login=await auth.act('login',{email:'tech@example.com',password:'staff-password-123'},req());assert.ok(await auth.current(req(login.cookie)));
+await auth.act('logout',{},req(login.cookie));assert.equal(await auth.current(req(login.cookie)),null);
+await activate('tech@example.com');assert.equal(await auth.current(req(techCookie)),null);
+const commands=[];const bucket=createBucket({S3_BUCKET:'test-bucket',AWS_REGION:'eu-west-1',S3_PREFIX:'electomatic/'},{async send(command){commands.push(command);if(command.constructor.name==='GetObjectCommand')return {Body:{transformToWebStream:()=>new ReadableStream()}};return {}}});
+const id='12345678-1234-1234-1234-123456789012';await bucket.put(id,new ArrayBuffer(1),{httpMetadata:{contentType:'application/pdf'}});await bucket.get(id);await bucket.delete(id);assert.deepEqual(commands.map(c=>c.constructor.name),['PutObjectCommand','GetObjectCommand','DeleteObjectCommand']);assert.equal(commands[0].input.Key,'electomatic/'+id);assert.equal(commands[0].input.ACL,undefined);
+await assert.rejects(()=>bucket.get('../secret'));
+console.log('PASS: PostgreSQL migrations, large money, transactional workflow/audits, receipt rules, restricted bootstrap, single-use invitations, sessions, logout, password reset and private S3 adapter.');
+await pg.close();
