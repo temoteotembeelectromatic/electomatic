@@ -88,3 +88,7 @@ A migração `003_cash_movements.sql` acrescenta uma tabela e índices sem alter
 Em Equipa, o Admin pode gerar um **Link de acesso / redefinição**, copiá-lo e enviá-lo directamente à pessoa. O link é associado ao email, expira em 48 horas e funciona uma única vez; gerar outro invalida o anterior. O programa não envia emails automaticamente.
 
 A opção **Definir palavra-passe** permite ao Admin definir uma palavra-passe temporária para Técnico, Gestor ou Financeiro (incluindo uma conta ainda não activada). Sessões e convites anteriores são invalidados. Após entrar, a pessoa só poderá usar a aplicação depois de escolher uma palavra-passe diferente. A conta do próprio Admin não pode ser redefinida por esta opção; pode utilizar **Alterar palavra-passe** com a sua palavra-passe actual. As alterações ficam auditadas sem gravar as palavras-passe no histórico.
+
+## Diagnóstico de erros
+
+Falhas de S3 e PostgreSQL mostram o serviço, a operação quando disponível, o código do erro e uma referência única. Nos logs do Render, pesquise essa referência para encontrar a mensagem técnica. O programa não devolve credenciais, URLs de ligação ou conteúdo das linhas SQL ao browser. Erros de validação continuam a indicar directamente o campo a corrigir.

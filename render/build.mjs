@@ -4,6 +4,7 @@ import {readFile,writeFile,mkdir} from 'node:fs/promises';
 await build({configFile:'render/vite.config.mjs'});
 let source=await readFile('app/api/workspace/route.ts','utf8');
 source=source.replace("import { env } from 'cloudflare:workers';", "import { env } from '../render/runtime.mjs';").replace("import { getChatGPTUser } from '../../chatgpt-auth';", "import { getChatGPTUser } from '../render/runtime.mjs';");
+source=source.replace("'../../../lib/error-report.mjs'","'../lib/error-report.mjs'");
 if(source.includes('cloudflare:workers')||source.includes("'../../chatgpt-auth'"))throw new Error('Render adaptation failed');
 await mkdir('render-dist',{recursive:true});
 await writeFile('render-dist/workspace.mjs',ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText);

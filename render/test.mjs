@@ -1,7 +1,10 @@
+import {reportError} from '../lib/error-report.mjs';
 import {PGlite} from '@electric-sql/pglite';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
+import {pathToFileURL} from 'node:url';
+import path from 'node:path';
 import {createDatabase} from './postgres.mjs';
 import {createAuth,workspaceAccess} from './auth.mjs';
 import {migrate} from './migrate.mjs';
@@ -21,7 +24,7 @@ let user=await auth.current(req(boot.cookie));assert.equal(user.email,config.ADM
 await assert.rejects(()=>auth.act('bootstrap',{email:config.ADMIN_EMAIL,password:'long-password-123',token:config.BOOTSTRAP_TOKEN},req()),e=>e.status===403);
 const storage=new Map();globalThis.__renderEnv={DB,BUCKET:{async put(k,v){storage.set(k,v)},async get(k){return storage.has(k)?{body:storage.get(k)}:null},async delete(k){storage.delete(k)}}};
 globalThis.__renderUser=()=>user;
-let source=fs.readFileSync('app/api/workspace/route.ts','utf8').replace("import { env } from 'cloudflare:workers';",'const env=globalThis.__renderEnv;').replace("import { getChatGPTUser } from '../../chatgpt-auth';",'const getChatGPTUser=async()=>globalThis.__renderUser();');
+let source=fs.readFileSync('app/api/workspace/route.ts','utf8').replace("'../../../lib/error-report.mjs'",JSON.stringify(pathToFileURL(path.resolve('lib/error-report.mjs')).href)).replace("import { env } from 'cloudflare:workers';",'const env=globalThis.__renderEnv;').replace("import { getChatGPTUser } from '../../chatgpt-auth';",'const getChatGPTUser=async()=>globalThis.__renderUser();');
 const api=await import('data:text/javascript;base64,'+Buffer.from(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText).toString('base64'));
 async function post(b,status=200){const form=b instanceof FormData;const r=await api.POST(new Request('http://localhost/api/workspace',{method:'POST',headers:form?{}:{'Content-Type':'application/json'},body:form?b:JSON.stringify(b)}));const body=await r.json();assert.equal(r.status,status,JSON.stringify(body));return body}
 async function get(){return (await api.GET(new Request('http://localhost/api/workspace'))).json()}
@@ -140,4 +143,23 @@ await pool.query("UPDATE invites SET expires=now()-interval '1 minute' WHERE ema
 await assert.rejects(()=>auth.act('activate',{email:'manager@example.com',token:expired.body.invitation.split('#')[1],password:'manager-private-pass'},req()),e=>e.status===403);
 console.log('PASS: temporary passwords restricted to Admin, revoked sessions/links, mandatory password change, password-free audit records, replaced/single-use/expired reset links.');
 console.log('PASS: PostgreSQL migrations, large money, transactional workflow/audits, receipt rules, restricted bootstrap, single-use invitations, sessions, logout, password reset and private S3 adapter.');
+
+// The same failure shown by the API carries an actionable code and correlated sanitized log.
+const captured=[];const originalLogger=console.error;const oldPut=globalThis.__renderEnv.BUCKET.put;
+try{
+  console.error=value=>captured.push(String(value));
+  user=await auth.current(req(boot.cookie));
+  globalThis.__renderEnv.BUCKET.put=async()=>{throw Object.assign(new Error('Access Denied'),{name:'AccessDenied',service:'S3',operation:'PutObject',$metadata:{requestId:'aws-request-1',httpStatusCode:403}})};
+  const result=await post(movement(crypto.randomUUID()),500);
+  assert.match(result.error,/S3 \/ PutObject/);assert.match(result.error,/AccessDenied/);assert.ok(result.diagnosticId);assert.equal(result.providerRequestId,'aws-request-1');
+  assert.ok(captured.some(line=>line.includes(result.diagnosticId)));
+  const dbError=reportError({code:'42P01',message:'relation cash_movements does not exist',table:'cash_movements'});
+  assert.match(dbError.body.error,/migrações/);assert.match(dbError.body.error,/cash_movements/);
+  assert.equal(reportError({status:400,message:'Valor inválido.'}).body.error,'Valor inválido.');
+  const hidden=reportError(new Error('postgresql://user:password@private/db token=secret123'));
+  assert.ok(!hidden.body.error.includes('private/db'));
+  assert.ok(captured.every(line=>!line.includes('secret123')&&!line.includes('user:password')));
+  for(const code of ['NoSuchBucket','CredentialsProviderError','SignatureDoesNotMatch'])assert.match(reportError({name:code,service:'S3'}).body.error,new RegExp(code));
+}finally{console.error=originalLogger;globalThis.__renderEnv.BUCKET.put=oldPut}
+console.log('PASS: actionable API errors, AWS/SQL codes, correlation references, controlled validation messages and sanitized logs.');
 await pg.close();

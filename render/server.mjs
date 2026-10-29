@@ -1,3 +1,4 @@
+import {reportError} from '../lib/error-report.mjs';
 import http from 'node:http';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -52,7 +53,7 @@ const server=http.createServer(async(incoming,outgoing)=>{
     const headers=new Headers();for(const [k,v] of Object.entries(incoming.headers))if(v)headers.set(k,Array.isArray(v)?v.join(','):v);
     const request=new Request(new URL(incoming.url,publicOrigin),{method:incoming.method,headers,...(!['GET','HEAD'].includes(incoming.method)?{body:Buffer.concat(chunks)}:{})});
     let response;
-    try{response=await dispatch(request)}catch(e){console.error('Request failed:',e.status||500,e.code||e.name);response=json({error:e.status?e.message:'Não foi possível concluir. Tente novamente.'},e.status||500)}
+    try{response=await dispatch(request)}catch(e){const result=reportError(e);response=json(result.body,result.status)}
     if(!response.headers.has('Cache-Control'))response.headers.set('Cache-Control','no-store');
     response.headers.set('X-Content-Type-Options','nosniff');response.headers.set('X-Frame-Options','DENY');response.headers.set('Referrer-Policy','no-referrer');
     response.headers.set('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");

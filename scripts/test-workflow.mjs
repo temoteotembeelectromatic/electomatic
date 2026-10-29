@@ -2,13 +2,15 @@ import {DatabaseSync} from 'node:sqlite';
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import ts from 'typescript';
+import {pathToFileURL} from 'node:url';
+import path from 'node:path';
 const sqlite=new DatabaseSync(':memory:');
 for(const f of fs.readdirSync('drizzle').filter(f=>f.endsWith('.sql')).sort())sqlite.exec(fs.readFileSync('drizzle/'+f,'utf8'));
 class Statement {constructor(sql,args=[]){this.sql=sql;this.args=args}bind(...args){return new Statement(this.sql,args)} async first(){return sqlite.prepare(this.sql).get(...this.args)||null}async all(){return {results:sqlite.prepare(this.sql).all(...this.args)}}async run(){const r=sqlite.prepare(this.sql).run(...this.args);return {meta:{changes:Number(r.changes)}}}}
 const db={prepare:sql=>new Statement(sql),async batch(statements){sqlite.exec('BEGIN');try{const results=[];for(const s of statements)results.push(await s.run());sqlite.exec('COMMIT');return results}catch(e){sqlite.exec('ROLLBACK');throw e}}};
 const files=new Map();globalThis.__testEnv={DB:db,BUCKET:{async put(k,v){files.set(k,v)},async get(k){return files.has(k)?{body:files.get(k)}:null},async delete(k){files.delete(k)}}};
 let user={userId:'owner',email:'owner@example.com',displayName:'Owner'};globalThis.__testUser=()=>user;
-const source=fs.readFileSync('app/api/workspace/route.ts','utf8').replace(/import \{ env \} from 'cloudflare:workers';/,'const env=globalThis.__testEnv;').replace(/import \{ getChatGPTUser \} from '..\/..\/chatgpt-auth';/,'const getChatGPTUser=async()=>globalThis.__testUser();');
+const source=fs.readFileSync('app/api/workspace/route.ts','utf8').replace("'../../../lib/error-report.mjs'",JSON.stringify(pathToFileURL(path.resolve('lib/error-report.mjs')).href)).replace(/import \{ env \} from 'cloudflare:workers';/,'const env=globalThis.__testEnv;').replace(/import \{ getChatGPTUser \} from '..\/..\/chatgpt-auth';/,'const getChatGPTUser=async()=>globalThis.__testUser();');
 const compiled=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.ESNext}}).outputText;const api=await import('data:text/javascript;base64,'+Buffer.from(compiled).toString('base64'));
 async function post(body,expected=200){const upload=body instanceof FormData;const res=await api.POST(new Request('https://test.local/api/workspace',{method:'POST',headers:upload?{Origin:'https://test.local'}:{Origin:'https://test.local','Content-Type':'application/json'},body:upload?body:JSON.stringify(body)}));const result=await res.json();assert.equal(res.status,expected,JSON.stringify(result));return result}
 async function get(){const r=await api.GET(new Request('https://test.local/api/workspace'));return {status:r.status,body:await r.json()}}
