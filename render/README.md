@@ -68,3 +68,9 @@ Os testes usam o motor PostgreSQL PGlite e um cliente S3 simulado. Validam SQL, 
 O processo web não mantém dados persistentes no disco. Registos, contas e sessões ficam em PostgreSQL; anexos ficam no S3. Este deploy usa uma nova base de dados: **não migra automaticamente registos ou anexos da versão Sites**. A versão Sites permanece independente. Se já houver dados reais nela, planeie a exportação/importação antes de passar a usar apenas o Render.
 
 Referências: [Render Blueprints](https://render.com/docs/blueprint-spec), [AWS S3 SDK](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/javascript_s3_code_examples.html).
+
+## Função Financeiro
+
+O Administrador aprova ou rejeita pedidos; não pode aprovar o seu próprio pedido. Financeiro e Administrador podem registar pagamentos apenas após aprovação do Administrador. Financeiro consulta pedidos e comprovativos da empresa, mas não gere a equipa, cria projectos ou encerra contas. Gestor mantém a gestão de projectos e o encerramento de contas, sem aprovar ou registar pagamentos.
+
+A migração `002_finance_role.sql` acrescenta a função sem apagar dados. Pedidos antigos aprovados por Gestores requerem validação do Administrador antes do pagamento. Pagamentos e contas já encerradas são preservados.

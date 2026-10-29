@@ -26,7 +26,7 @@ const {id}=await post({action:'request',project,purpose:'Cable materials',catego
 await post({action:'decision',id,status:'approved',note:'Self approval'},403);
 await post(upload(id,'pay',{method:'M-Pesa',reference:'123',payee:'Tech',date:'2026-01-01'}),403);
 user={userId:'outsider',email:'outsider@example.com',displayName:'Outsider'};assert.equal((await get()).status,403);
-user={userId:'manager',email:'manager@example.com',displayName:'Manager'};
+user={userId:'owner',email:'owner@example.com',displayName:'Owner'};
 await post({action:'decision',id,status:'approved',note:'Materials verified'});
 await post({action:'decision',id,status:'approved',note:'Duplicate'},409);
 await post({action:'pay',id,method:'M-Pesa',reference:'123',payee:'Tech',date:'2026-01-01'},400);

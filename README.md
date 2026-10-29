@@ -9,9 +9,9 @@ Company funding requests for Mozambique. Portuguese interface, MZN integer-cent 
 ## First use
 
 1. Open the private Site and sign in as its owner. Configure the company name and 9-digit NUIT. The first signed-in user to configure this **owner-private** deployment becomes administrator; complete this before sharing the Site.
-2. Add each employee's ChatGPT email under Equipa, as Técnico or Gestor. Independently grant those people Site access in the Site sharing settings. Adding a member does not send an invitation or alter Site sharing.
-3. A manager creates projects with client, location and budget. Technicians submit requests against a project. Another manager approves or rejects with a reason. Self-approval is prohibited, including for administrators.
-4. A manager records a full payment with method, beneficiary, transaction reference, date and PDF/JPEG/PNG proof (maximum 10 MB). This records payments; it does not initiate M-Pesa, e-Mola or bank transfers.
+2. Add each employee's ChatGPT email under Equipa, as Técnico, Gestor or Financeiro. Independently grant those people Site access in the Site sharing settings. Adding a member does not send an invitation or alter Site sharing.
+3. A manager creates projects with client, location and budget. Technicians submit requests against a project. The administrator approves or rejects with a reason. Self-approval is prohibited, including for administrators.
+4. Financeiro or the administrator records a full payment after administrator approval with method, beneficiary, transaction reference, date and PDF/JPEG/PNG proof (maximum 10 MB). This records payments; it does not initiate M-Pesa, e-Mola or bank transfers.
 5. Attach expense receipts. A manager reviews evidence and closes the request with a verification note.
 
 Every workflow mutation records the authenticated actor and server timestamp. Evidence is append-only through the application, downloaded only after authorization, and includes SHA-256 hashes. Status changes use optimistic concurrency and transactional audit writes. These are application audit records, not independently certified or tamper-proof accounting records.

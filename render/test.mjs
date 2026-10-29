@@ -30,21 +30,43 @@ await post({action:'member',email:'manager@example.com',name:'Manager',role:'man
 await post({action:'project',name:'Maputo',client:'Client',location:'Maputo',budget:'999999999'});
 const project=(await get()).projects[0].id;
 async function activate(email){const invite=await auth.act('invite',{email},req(boot.cookie));const token=invite.body.invitation.split('#')[1];const activated=await auth.act('activate',{email,token,password:'staff-password-123'},req());await assert.rejects(()=>auth.act('activate',{email,token,password:'staff-password-123'},req()),e=>e.status===403);return activated.cookie}
+await post({action:'member',email:'finance@example.com',name:'Finance',role:'finance'});
+const financeCookie=await activate('finance@example.com');
 const techCookie=await activate('tech@example.com');const managerCookie=await activate('manager@example.com');
 user=await auth.current(req(techCookie));
 const request=await post({action:'request',project,purpose:'Materials',category:'Materiais',amount:'2500.50'});
 await post({action:'decision',id:request.id,status:'approved',note:'Self'},403);
 user=await auth.current(req(managerCookie));
+await post({action:'decision',id:request.id,status:'approved',note:'Manager denied'},403);
+user=await auth.current(req(financeCookie));
+await post({action:'decision',id:request.id,status:'approved',note:'Finance denied'},403);
+await post(file('pay'),403);
+await post({action:'project',name:'Denied',client:'C',location:'M',budget:'100'},403);
+user=await auth.current(req(boot.cookie));
 await post({action:'decision',id:request.id,status:'approved',note:'Verified'});
 await post({action:'decision',id:request.id,status:'approved',note:'Repeated'},409);
 function file(action,kind='receipt'){const f=new FormData();for(const [k,v]of Object.entries({action,id:request.id,kind,method:'M-Pesa',reference:'MP-001',payee:'Tech',date:'2026-01-01'}))f.set(k,v);f.set('file',new File(['%PDF-1.7 test'],'proof.pdf',{type:'application/pdf'}));return f}
+user=await auth.current(req(managerCookie));
+await post(file('pay'),403);
+user=await auth.current(req(financeCookie));
+assert.equal((await get()).requests[0].admin_approved,1);
 await post({action:'pay',id:request.id},400);
 await post(file('pay'));
+await post({action:'close',id:request.id,note:'Finance denied'},403);
+user=await auth.current(req(managerCookie));
 await post(file('upload','supporting'));
 await post({action:'close',id:request.id,note:'Not yet'},400);
 await post(file('upload'));
 await post({action:'close',id:request.id,note:'Receipts reconciled'});
 const state=await get();assert.equal(state.requests[0].status,'closed');assert.equal(state.audit.filter(a=>a.request===request.id).length,6);assert.equal(storage.size,3);
+user=await auth.current(req(techCookie));
+const legacy=await post({action:'request',project,purpose:'Legacy approval',category:'Materiais',amount:'100'});
+await pool.query("UPDATE requests SET status='approved',decided_by='manager@example.com' WHERE id=$1",[legacy.id]);
+user=await auth.current(req(financeCookie));
+await post({action:'pay',id:legacy.id},403);
+user=await auth.current(req(boot.cookie));
+await post({action:'decision',id:legacy.id,status:'approved',note:'Admin validation'});
+assert.equal((await get()).requests.find(r=>r.id===legacy.id).admin_approved,1);
 // Atomic batches roll back every statement and keep conditional audit inserts out after conflicts.
 await assert.rejects(()=>DB.batch([DB.prepare('UPDATE requests SET version=version+1 WHERE id=?').bind(request.id),DB.prepare('INSERT INTO company(id,name,nuit,owner) VALUES(1,?,?,?)').bind('duplicate','123456789','x')]));
 const count=(await DB.prepare('SELECT count(*)::int AS n FROM audit').first()).n;
